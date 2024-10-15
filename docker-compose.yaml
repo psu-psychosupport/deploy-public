@@ -1,0 +1,81 @@
+version: "3.9"
+services:
+  database:
+    image: postgres:16
+    container_name: database
+    volumes:
+      - ./postgresql.conf:/etc/postgresql.conf
+      - ./postgres-data:/var/lib/postgresql/data
+    env_file:
+      - .env-prod
+    ports:
+      - "5431:5431"
+    expose:
+      - 5431
+    command: -p 5431
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready", "-U", "postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  meili:
+    image: getmeili/meilisearch:v1.7
+    container_name: meili
+    volumes:
+      - ./data.ms:/data.ms
+    env_file:
+      - .env-prod
+
+  meilisync:
+    platform: linux/x86_64
+    image: long2ice/meilisync
+    volumes:
+      - ./meilisync_config.yml:/meilisync/config.yml
+    depends_on:
+      - database
+      - meili
+
+  backend:
+    build:
+      context: ./backend
+    container_name: backend
+    env_file:
+      - .env-prod
+    command: bash -c "alembic upgrade head && gunicorn src.main:app --workers 3 --worker-class uvicorn.workers.UvicornWorker --bind=0.0.0.0:8000"
+    depends_on:
+      - database
+      - meili
+    ports:
+      - "8000:8000"
+    volumes:
+      - media_files:/backend/files
+
+  admin_frontend:
+    build:
+      context: ./admin
+    container_name: admin_frontend
+    command: bash -c "npm run start"
+    environment:
+      - PORT=3010
+    ports:
+      - "3010:3010"
+
+  public_frontend:
+    build:
+      context: ./public
+    container_name: public_frontend
+    command: bash -c "npm run start"
+    environment:
+      - PORT=3000
+    ports:
+      - "3000:3000"
+
+volumes:
+  media_files:
+    driver: local
+    driver_opts:
+      type: "none"
+      o: "bind"
+        # TODO: Change to normal dir
+      device: "/home/damego/stoboi/backend/files"
